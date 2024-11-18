@@ -1,0 +1,455 @@
+function measure_CSFs(subject,viewdist)
+
+%******************************************************************************
+% method of adjustment to measure CSFs
+%
+% 5 spatial frequencies (0.5, 1, 2, 4, 6) for three mechanisms (lum, l-m, S-(L+M))
+%
+% left button 		increase contrast
+% right button 	   decrease contrast
+% top button		abort procedure
+% bottom button	finish procedure when equality is achieved
+%
+%written by j martinovic, sept 2024
+%******************************************************************************
+
+pathname='\research\wellcome\results\CSF\';
+hcfppath='\research\wellcome\results\flicker\';
+
+%reset random number generator
+rng('shuffle')
+
+%---------------------------------------------------------
+% initialise VSG-Card
+%---------------------------------------------------------
+global CRS;
+
+crsInit('');                                    % default VSG initialisation
+crsSetVideoMode(CRS.EIGHTBITPALETTEMODE+CRS.GAMMACORRECT); % make sure we are using basic CLUT mode
+crsSetDrawMode(CRS.CENTREXY + CRS.SOLIDFILL);    % set draw mode co-ordinate system
+
+%set spatial units
+crsSetSpatialUnits( CRS.PIXELUNIT);
+%Change the drawing origin to the top-left of the page.
+crsSetDrawOrigin([0 0]);
+%get screen parameters
+ScrHeight=crsGetScreenHeightPixels;
+ScrWidth=crsGetScreenWidthPixels;
+%screen size in cm
+horsize=39.2; versize=29.4; %viewsonic
+horpx=horsize/ScrWidth;
+verpx=versize/ScrHeight;
+pxsize=(horpx+verpx)/2;
+%calculate size of 1 deg in pixels
+visang_rad = 2 * atan(pxsize/2/viewdist);
+visang_deg = visang_rad * (180/pi);
+pix_pervisang = round(ScrWidth / visang_deg);
+%we can use this to calculate the size of each Gabor to maintain 2 cycles
+%(i.e. fixed number of cycles rather than fixed size);
+%The width of the Gaussian envelope will be set to half of the wavelength,
+%? = (0.5/f) degrees; all of these are as in wuerger et al., 2020, JoV
+
+%get rid of any com port instruments (in case button box has been initialised)
+delete(instrfindall);
+
+%----------------------------------------------------------
+%SET COLOUR PARAMETERS
+%----------------------------------------------------------
+% make a greyscale CLUT - 256x3 matrix, add colours to it
+crsSetColourSpace(CRS.CS_RGB);	% use RGB space
+%load my own whitepoint from a file
+%0000000000000000000000000000000000
+%result1=sprintf('c:/research/WP.mat');
+%eval(['load ' result1 ]);	% returns WP_xyY
+
+WP_xyY=[0.3127 0.3290 50];
+
+%use Stockman & Sharpe (2000) cone fundamentals
+Sensors = 'ConeSensitivities_SS_2degELin3908301.mat';
+% Define which display device SPD to use.
+deviceSPD = 'ViewSonicP227f.mat';
+% Define which colour matching functions to use - CIE 1931 2-deg.
+Sensors_CMF = 'CMF_CIE1931_2deg3608301.mat';
+
+%get whitepoint
+WP_RGB = ctGetColourTrival('CS_CIE1931xyY','CS_RGB',WP_xyY,deviceSPD,Sensors_CMF);
+
+LUTBuff=repmat(WP_RGB',256,1);
+white=[1,1,1]; %rgb white, for fixation
+LUTBuff(255,:)=white; %white
+LUTBuff(254,:)=[0,0,0]; %black
+backpix=256; %set background to 256
+whitepix=255;
+
+crsLUTBUFFERWrite(1,LUTBuff);     % load the CLUT into VSG LUT memory
+crsLUTBUFFERtoPalette(1);           % make the whitepoint CLUT the current palette
+
+crsSetDrawPage(CRS.VIDEOPAGE,1,backpix);  % clear draw page to grey
+crsSetZoneDisplayPage(CRS.VIDEOPAGE,1);   % set display page to draw page
+
+% read in mean results of hcfp
+result1=sprintf('c:%s%s.mat',hcfppath,subject);
+eval(['load ' result1 ]);
+
+%----------------------------------------
+%OPEN FILE FOR RESULTS
+%----------------------------------------
+% each trial is recorded in a single line in this file
+ch=exist(sprintf(sprintf('c:/research/wellcome/results/CSF/%s_CSFs.result',subject)));
+if ch==0
+    fid1=fopen(sprintf('c:/research/wellcome/results/CSF/%s_CSFs.result',subject),'w');
+else
+    disp('save file already exists! please recheck participant number or other inputs.')
+    return
+end
+
+% %open communication with the cedrus button box
+%------------------------------------------------
+dev.link = serial('COM14', 'BaudRate', 115200, 'DataBits', 8, 'StopBits', 1,...
+    'FlowControl', 'none', 'Parity', 'none', 'Terminator', 'CR', 'Timeout', 400,...
+    'InputBufferSize', 16000);
+fopen(dev.link);
+% Set the device protocol to XID mode
+fprintf(dev.link,'c10'); %c10 is the xid mode, which is the one that reads RTs
+%fprintf(dev.link, '_d3'); %gets the model ID: 1 is RB530
+%bytes = dev.link.BytesAvailable; if bytes==1, disp('RB530 is operational');
+%fprintf(dev.link, '_d1'); %gets the name of the model
+%bytes = dev.link.BytesAvailable;
+%dev.Name = char([fread(dev.link,bytes)]')
+% Reset base timer:
+fprintf(dev.link,'e1');
+
+%-----------------------------------------------------------------
+% EXP LIST; setting up the conditions
+%-----------------------------------------------------------------
+trialscond=3;
+%5 SFs for 3 mechanisms = 15 conditions in total
+cond1=ones(1,trialscond);cond2=repmat(2,1,trialscond);
+cond3=repmat(3,1,trialscond);cond4=repmat(4,1,trialscond);
+cond5=repmat(5,1,trialscond);cond6=repmat(6,1,trialscond);
+cond7=repmat(7,1,trialscond);cond8=repmat(8,1,trialscond);
+cond9=repmat(9,1,trialscond);cond10=repmat(10,1,trialscond);
+cond11=repmat(11,1,trialscond);cond12=repmat(12,1,trialscond);
+cond13=repmat(13,1,trialscond);cond14=repmat(14,1,trialscond);
+cond15=repmat(15,1,trialscond);
+
+conds=[cond1 cond2 cond3 cond4 cond5 cond6 cond7 cond8 cond9 cond10 cond11 cond12 cond13 cond14 cond15];
+randconds=randperm(length(conds));
+saveconds=conds(randconds);
+%now i want to save this order of conditions, for rerunning it if necessary
+save([pathname '\' subject '_CSF_conds.txt'], 'saveconds', '-ASCII');
+
+% -----------------------------------------------------------------------
+% displays a page with instructions for the subject and wait for keypress
+% -----------------------------------------------------------------------
+%Select a page in memory to draw onto.
+crsSetDrawPage(CRS.VIDEOPAGE,2, backpix);
+%Select pixel-level(1) to draw with - 255 IS WHITE
+crsSetPen1(255);
+%Load the true type font that you want to write with.
+crsSetTrueTypeFont('Arial.ttf');
+%Set the draw modes for the text i.e. centred, italic, angle, size.
+crsSetStringMode([0 ScrHeight/21], CRS.ALIGNLEFTTEXT, CRS.ALIGNTOPTEXT, 0, CRS.FONTNORMAL);
+%Change the drawing origin to the top-left of the page.
+crsSetDrawOrigin([0 0]);
+%Draw some text.
+str1='This is an experiment about contrast sensitivity.';
+str2='You will see a stimulus patch presented centrally on';
+str3='the screen. Your task is to adjust the appearance of ';
+str4='the patch so that it is just barely visible First, take';
+str5='your time to spot the patch. If you cannot see it, use the';
+str6='TOP BUTTON to increase the contrast in big steps. Now you ';
+str7='can use the LEFT (increase) and RIGHT (decrease) buttons to';
+str8='fine-tune your settings, until you are happy that the patch ';
+str9='is just one button press above not being visible at all ';
+str10='(i.e. it is just barely visible). If this process is too';
+str11='slow, you can also use the BOTTOM button to decrease the ';
+str12='contrast in big steps.';
+str13=' ';
+str14='Press the MIDDLE button when you have completed the';
+str15='settting and the next colour patch will be shown. ';
+str16=' ';
+str17='Press the LEFT button to start.';
+
+for s=1:17
+    crsDrawString([10 10+s*32], eval( sprintf('str%i',s)));
+end
+%Display the page that the text was drawn onto.
+crsSetZoneDisplayPage(CRS.VIDEOPAGE,2);
+%read button press from response box
+[answer,~,dev]=cedrus_LR(dev);
+
+%display grey for 5 seconds before starting
+crsSetDrawPage(CRS.VIDEOPAGE,1, backpix);
+crsSetZoneDisplayPage(CRS.VIDEOPAGE,1);
+pause(1);
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+% MAIN EXPERIMENT
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%grey adaptation
+%Select a page in memory to draw onto.
+crsSetDrawPage(CRS.VIDEOPAGE,6, backpix);
+crsSetZoneDisplayPage(CRS.VIDEOPAGE,6);
+
+% start presentation-loop
+for j = 1:length(saveconds)
+    
+    %grey adaptation
+    %Select a page in memory to draw onto.
+    crsSetDrawPage(CRS.VIDEOPAGE,5, backpix);
+    crsSetZoneDisplayPage(CRS.VIDEOPAGE,5);
+    pause(5);
+    
+currentcond=saveconds(j);
+
+%%%%%%%%%%%%%%%%%
+%display stimuli
+%%%%%%%%%%%%%%%%%
+% display the overall number of trials so far
+disp('-------------------');
+disp('Overall trial no.:');
+disp(num2str(j));
+disp('condition');
+disp(num2str(currentcond));
+%display grey for 2 seconds before starting
+crsSetDrawPage(CRS.VIDEOPAGE,1, backpix);
+crsSetZoneDisplayPage(CRS.VIDEOPAGE,1);
+pause(2);
+
+%set up the colours for the stimuli
+
+%choose the colour to run
+%---------------------
+if currentcond<6 %lum
+    %adjust lum
+    delta=0.0020; %small (default) step size
+    deltabig=0.02; %big step size
+    relLum1=90; th1=0;
+    relLum2=-90; th2=0;
+    testRadius=0.02; %initial radius, when stim appears
+elseif currentcond>5 && currentcond<11
+    delta=0.0005; %step size
+    deltabig=0.005; %big step size
+    relLum1=relLum_0; th1=0;
+    relLum2=relLum_180; th2=180;
+    testRadius=0.003;
+elseif currentcond>10 %s cone
+    delta=0.005; %step size
+    deltabig=0.05; %big step size
+    relLum1=relLum_90; th1=90;
+    relLum2=relLum_270; th2=270;
+    testRadius=0.02;
+end
+
+%now set up the spatial properties of the patch
+if currentcond==1 || currentcond==6 || currentcond==11
+    SF=0.5;
+elseif currentcond==2 || currentcond==7 || currentcond==12
+    SF=1;
+elseif currentcond==3 || currentcond==8 || currentcond==13
+    SF=2;
+elseif currentcond==4 || currentcond==9 || currentcond==14
+    SF=4;
+elseif currentcond==5 || currentcond==10 || currentcond==15
+    SF=6;
+end
+
+%----------------------------------------
+% select a random point off the initial radius
+%----------------------------------------
+draw=XausY(1,9);	% up to delta * draw deg off
+up=XausY(1,3);
+if up ==1 % 1 = contrast increases
+    testRadius=testRadius + delta*draw;
+else
+    testRadius=testRadius -delta*draw;
+end
+
+%introduce a check to ensure testRadius never goes below zero
+if testRadius <0
+    testRadius=0.00000000001;
+end
+
+%-------------------------------------
+%set up the object drawing
+%-------------------------------------
+% Gabor parameters (palette functional form)
+gabor_pixLow = 1; % Select the range of pixel-levels
+gabor_pixHi  = 100; % to draw the gabor with.
+gabor_background_colour = WP_RGB;
+
+%set up Gabor colours
+STC1=zeros(gabor_pixHi,3);
+no_of_steps=gabor_pixHi/2;
+stepsize=testRadius/(no_of_steps - 1);
+%     %make empty trivector matrix for stimulus colour in DKL
+for i_decr = 1:no_of_steps
+    STC1((no_of_steps-i_decr+1),:) = [i_decr*stepsize th1 relLum1];
+end
+for i_incr = 1:no_of_steps
+    STC1(i_incr+no_of_steps,:) = [i_incr* stepsize th2 relLum2];
+end
+% %now turn all those colours into RGB and put them into the LUT buffer
+for colnum=1:gabor_pixHi
+    [LUTBuff(colnum,:) ErrorCode]= ctGetColourTrival('CS_DKL','CS_RGB',[WP_RGB',STC1(colnum,:)],deviceSPD,Sensors);
+    if ErrorCode == -1, disp('THE REQUESTED COLOUR IS OUT OF RANGE'); end
+end
+
+crsLUTBUFFERWrite(1,LUTBuff);     % load the CLUT into VSG LUT memory
+crsLUTBUFFERtoPalette(1);           % make the whitepoint CLUT the current palette
+
+%-------------------------------------
+%set up the object drawing
+%-------------------------------------
+
+% Set page no and initialise to background colour
+drawingpage = 1;
+crsSetDrawPage(CRS.VIDEOPAGE, drawingpage, backpix);
+% draw the visual search elements
+%Change the drawing origin to the top-left of the page.
+crsSetDrawOrigin([0 0]);
+
+% -----------------------------------------------------------------------------
+% INITIALISE gabor PARAMETERS
+% -----------------------------------------------------------------------------
+% Gabor parameters (in degrees)
+gabor_size        = 500;
+gabor_angle = 0; %randi(360); %get random angle for the gabor
+gabor_stdev       = round(pix_pervisang*0.5*1/SF); %in pixels;
+gabor_phase      = 180; %TO DO - set off centre
+gabor_spatfr= SF;
+
+% Gabor parameters (palette functional form)
+gabor_pixLow = 1; % Select the range of pixel-levels
+gabor_pixHi  = 100; % to draw the gabor with.
+gabor_background_colour = WP_RGB;
+
+crsSetBackgroundColour(gabor_background_colour);
+
+crsSetDrawPage(CRS.VIDEOPAGE,drawingpage,backpix);
+
+gabor_y_pos = ScrHeight/2;
+gabor_x_pos = ScrWidth/2;
+
+crsSetPen1(gabor_pixLow);
+crsSetPen2(gabor_pixHi);
+
+crsDrawGabor([gabor_x_pos,gabor_y_pos], ...
+    [gabor_size, gabor_size],  ...
+    gabor_angle,              ...
+    gabor_spatfr,             ...
+    gabor_stdev,              ...
+    gabor_phase);
+
+%--------------------------------------
+% start with feedback routine
+start =1;	% controls while-loop
+
+while start
+    % start with radius defined in testRadius
+    disp('-------------------')
+    disp(sprintf('radius = %i ',testRadius))
+    
+    %Load the contents of the Buff into Look Up Table(LUT)
+    crsLUTBUFFERWrite(1,LUTBuff);
+    crsLUTBUFFERtoPalette(1);           % make the CLUT the current palette
+    
+    %display the page
+    crsSetDisplayPage(1);
+    
+    %   [res]=getResponseLR_newmatlab;	% 0=left, 1=right (-1 =abort, top, 2 = finish, bottom)
+    %[res] = cedrus_CRS;
+    try        [res,rt,dev] = cedrus_LR(dev);
+        
+        switch res
+            case 1
+                disp('Button pressed = Left');
+                testRadius=testRadius+delta;		%more
+            case 2
+                disp('Button pressed = middle');
+                start=0;
+            case 3
+                disp('Button pressed = Right');
+                testRadius=testRadius-delta;		%less
+            case 4
+                disp('Button pressed = bottom');
+                testRadius=testRadius-deltabig;		%less - big step
+            case 5
+                disp('Button pressed = top');
+                testRadius=testRadius+deltabig;		%more - big step
+        end
+        
+    catch %to catch the errors with overly rapid button pressing
+        continue
+    end
+    
+    %introduce a check to ensure testRadius never goes below zero
+    if testRadius <0
+        %might be good to introduce a beep here!
+        testRadius=0.00000000001;
+    end
+    
+    %redo the colours for the gabor based on the new radius
+    STC1=zeros(gabor_pixHi,3);
+    no_of_steps=gabor_pixHi/2;
+    stepsize=testRadius/(no_of_steps - 1);
+    %     %make empty trivector matrix for stimulus colour in DKL
+    for i_decr = 1:no_of_steps
+        STC1((no_of_steps-i_decr+1),:) = [i_decr*stepsize th1 relLum1];
+    end
+    for i_incr = 1:no_of_steps
+        STC1(i_incr+no_of_steps,:) = [i_incr* stepsize th2 relLum2];
+    end
+    % %now turn all those colours into RGB and put them into the LUT buffer
+    for colnum=1:gabor_pixHi
+        [LUTBuff(colnum,:) ErrorCode]= ctGetColourTrival('CS_DKL','CS_RGB',[WP_RGB',STC1(colnum,:)],deviceSPD,Sensors);
+        if ErrorCode == -1, disp('THE REQUESTED COLOUR IS OUT OF RANGE'); end
+    end
+    
+    crsLUTBUFFERWrite(1,LUTBuff);     % load the CLUT into VSG LUT memory
+    crsLUTBUFFERtoPalette(1);           % make the whitepoint CLUT the current palette
+    
+end
+
+%---------------------------------------------------------------
+% get final radius value of the target colour
+%---------------------------------------------------------------
+strcurrentcond=num2str(currentcond);
+
+disp('------------------------------')
+disp(sprintf('colour %s has a radius of: %f ',strcurrentcond,testRadius))
+disp('------------------------------')
+fprintf(fid1,'%i\t %i\t %i\t %i\t %i\n',j,currentcond,th1,th2,testRadius); %th, dist,any other important parameter we might want to analyse data by more easily
+
+end
+
+%----------------------------------------------
+%draw end text
+%Select a page in memory to draw onto.
+crsSetDrawPage(CRS.VIDEOPAGE,2, backpix);
+%Select pixel-level(1) to draw with
+crsSetPen1(255);
+crsSetPen2(256);
+%Load the true type font that you want to write with.
+crsSetTrueTypeFont('Arial.ttf');
+%Set the draw modes for the text i.e. centred, italic, angle, size.
+crsSetStringMode([0 ScrHeight/30], CRS.ALIGNLEFTTEXT, CRS.ALIGNTOPTEXT, 0, CRS.FONTNORMAL);
+%Change the drawing origin to the top-left of the page.
+crsSetDrawOrigin([0 0]);
+
+%close file
+fclose(fid1);
+
+%Draw some text.
+str1='Thank you for participating in this measurement!';
+crsDrawString([10 82], eval( sprintf('str1')));
+
+%Display the page that the text was drawn onto.
+crsSetZoneDisplayPage(CRS.VIDEOPAGE,2);
+
+close all;
+
+y1=sin(0.5*[1:1024]);
+sound([y1 y1 y1 y1])
+
